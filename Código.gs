@@ -1,5 +1,5 @@
 function doPost(e) {
-  try {
+  try { 
     // Recibimos la llamada dede PrivilegiosReporteController
     const data = JSON.parse(e.postData.contents);
     const { email, accion, url, id, nombreArchivo } = data;
