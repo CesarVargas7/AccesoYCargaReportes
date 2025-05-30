@@ -1,135 +1,147 @@
 function crearArchivo(email, url, nombreArchivo) {
   let idDocCreado;
 
-  // Valida si se recibe un Excel
-  if(url.includes("1drv.ms")) {
-    // Hace la conversión de Excel a Google Sheets
-    idDocCreado = importarExcelDesdeOneDrive(url, nombreArchivo);
-  }
-  // Si no, es un Drive
-  else {
-    idDocCreado = copiarArchivoDeDrive(url)
-  }
-  // Valida que si regresó un error (false).
-  if(!idDocCreado) { 
-    return "Error al importar de Excel a Google Sheets."
-  }
-
-  registrarImportacionEnSheets(url, idDocCreado)
-  permisoEdicion(email, idDocCreado)
-}
-
-// Además de volver a copiar el archivo original al creado,
-// sobreescribe el URL del archivo fuente
-function cargarArchivo(id) {
-  const fila = buscarIDCreado(id);
-  const sheet = SpreadsheetApp.openById("1NOQyzaGSHXWFcfHd7WjVnTk_b_zwrt2UKW1_xo8v_58").getSheets()[0];
-  const url = sheet.getRange(fila, obtenerColumna("Archivo Original")).getValue();
-
-  if (/onedrive|1drv\.ms/.test(url)) {
-    const blob = obtenerBlobDesdeOneDrive(url);
-    copiarContenidoDesdeBlob(blob, id); // la puedes crear si quieres una función específica para esto
-  } else {
-    const idFuente = extraerIDDrive(url);
-    copiarDesdeDrive(idFuente, id);
-  }
-}
-
-
-/* function actualizarArchivo(url, idDocCreado) {
-  const fila = buscarIDCreado(idDocCreado);
-  if (fila === -1) return Logger.log('❌ No se encontró el ID en la hoja.');
-
-  const sheet = getSheet();
-  let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  let col = headers.indexOf('Archivo Original') + 1;
-
-  // Agrega columna si no existe
-  if (!col) {
-    headers.push('Archivo Original');
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    col = headers.length;
-  }
-
-  // Escribe el nuevo URL y recarga el archivo
-  sheet.getRange(fila, col).setValue(url);
-  cargarArchivo(idDocCreado);
-} */
-
-// Solamente vuelve a copiar el archivo original al creado
-function cargarArchivo(idCreado) {
-  const fila = buscarIDCreado(idCreado);
-  if (fila === -1) return Logger.log('❌ No se encontró el ID en la hoja.');
-
-  const sheet = getSheet();
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const colOriginal = headers.indexOf('Archivo Original') + 1;
-
-  if (!colOriginal) return Logger.log('❌ No existe la columna "Archivo Original".');
-
-  const url = sheet.getRange(fila, colOriginal).getValue().toString().trim();
-
-  if (!url) return Logger.log('⚠️ No hay URL en "Archivo Original"');
-
-  // Detecta si es un enlace de OneDrive
-  if (/1drv\.ms|onedrive\.live/.test(url)) {
-    copiarDesdeOneDrive(url, idCreado);
-  } else {
-    const match = url.match(/[-\w]{25,}/); // Extraer ID de Drive
-    if (match) {
-      copiarDesdeDrive(match[0], idCreado);
+  try {
+    if(url.includes("1drv.ms") || url.includes("onedrive")) {
+      idDocCreado = importarExcelDesdeOneDrive(url, nombreArchivo);
     } else {
-      Logger.log('❌ No se pudo extraer ID válido de Drive');
+      const idOrigen = extraerIDDrive(url);
+      if (!idOrigen) {
+        Logger.log('❌ No se pudo extraer ID de Drive del URL: ' + url);
+        return "Error: URL de Drive no válido";
+      }
+      idDocCreado = copiarArchivoDeDrive(idOrigen);
     }
+
+    if(!idDocCreado) { 
+      return "Error al importar archivo";
+    }
+
+    registrarImportacionEnSheets(url, idDocCreado);
+    const permisoResult = permisoEdicion(email, idDocCreado);
+    
+    return {
+      idCreado: idDocCreado,
+      permiso: permisoResult,
+      url: `https://docs.google.com/spreadsheets/d/${idDocCreado}`
+    };
+
+  } catch (error) {
+    Logger.log('❌ Error en crearArchivo: ' + error.toString());
+    return "Error al crear archivo: " + error.toString();
   }
 }
 
-// Asignación y remoción de permiso de lectura al archivo
+function cargarArchivo(idCreado) {
+  try {
+    const fila = buscarIDCreado(idCreado);
+    if (fila === -1) {
+      Logger.log('❌ No se encontró el ID en la hoja.');
+      return "Error: ID no encontrado";
+    }
+
+    const sheet = getSheet();
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const colOriginal = headers.indexOf('Archivo Original') + 1;
+
+    if (!colOriginal) {
+      Logger.log('❌ No existe la columna "Archivo Original".');
+      return "Error: Columna 'Archivo Original' no encontrada";
+    }
+
+    const url = sheet.getRange(fila, colOriginal).getValue().toString().trim();
+
+    if (!url) {
+      Logger.log('⚠️ No hay URL en "Archivo Original"');
+      return "Error: No hay URL en 'Archivo Original'";
+    }
+
+    if (/1drv\.ms|onedrive\.live/.test(url)) {
+      copiarDesdeOneDrive(url, idCreado);
+    } else {
+      const idOrigen = extraerIDDrive(url);
+      if (idOrigen) {
+        copiarDesdeDrive(idOrigen, idCreado);
+      } else {
+        Logger.log('❌ No se pudo extraer ID válido de Drive');
+        return "Error: ID de Drive no válido";
+      }
+    }
+
+    return "Archivo cargado exitosamente";
+
+  } catch (error) {
+    Logger.log('❌ Error en cargarArchivo: ' + error.toString());
+    return "Error al cargar archivo: " + error.toString();
+  }
+}
+
+function actualizarArchivo(url, idDocCreado) {
+  try {
+    const fila = buscarIDCreado(idDocCreado);
+    if (fila === -1) {
+      Logger.log('❌ No se encontró el ID en la hoja.');
+      return "Error: ID no encontrado";
+    }
+
+    const sheet = getSheet();
+    let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    let col = headers.indexOf('Archivo Original') + 1;
+
+    if (!col) {
+      headers.push('Archivo Original');
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      col = headers.length;
+    }
+
+    sheet.getRange(fila, col).setValue(url);
+    return cargarArchivo(idDocCreado);
+
+  } catch (error) {
+    Logger.log('❌ Error en actualizarArchivo: ' + error.toString());
+    return "Error al actualizar archivo: " + error.toString();
+  }
+}
+
 function permisoLectura(email, archivoId) {
   try {
-    // Obtener el archivo por ID
     const file = DriveApp.getFileById(archivoId);
+    const viewers = file.getViewers();
     
-    let viewers = file.getViewers();
-    // Si encuentra el lector, entonces la llamada es de remoción
-    if(viewers.includes(email)) {
+    const tienePermiso = viewers.some(viewer => viewer.getEmail() === email);
+    
+    if(tienePermiso) {
       file.removeViewer(email);
       return `Permiso de lectura removido a ${email}`;
+    } else {
+      file.addViewer(email);
+      return `Permiso de lectura asignado a ${email}`;
     }
-
-    // Si no lo encuentra, la llamada es de asignación
-    // Asigna el permiso de solo lectura sin enviar notificación
-    file.addViewer(email);
-    
-    return `Permiso de lectura asignado a ${email}`;
     
   } catch (error) {
+    Logger.log('❌ Error en permisoLectura: ' + error.toString());
     return `Error al asignar permiso: ${error.toString()}`;
   }
 }
 
-// Asignación y remoción de permiso de edición al archivo
 function permisoEdicion(email, archivoId) {
   try {
-    // Obtener el archivo por ID
     const file = DriveApp.getFileById(archivoId);
+    const editors = file.getEditors();
     
-    let editors = file.getEditors();
-    // Si encuentra el lector, entonces la llamada es de remoción
-    if(editors.includes(email)) {
+    const tienePermiso = editors.some(editor => editor.getEmail() === email);
+    
+    if(tienePermiso) {
       file.removeEditor(email);
       return `Permiso de edición removido a ${email}`;
+    } else {
+      file.addEditor(email);
+      file.setShareableByEditors(false); 
+      return `Permiso de edición asignado a ${email}`;
     }
-
-    // Si no lo encuentra, la llamada es de asignación
-    // Asignar permiso de solo lectura sin enviar notificación
-    file.addEditor(email);
-    // Asegura que a quienes se les da acceso el archivo como editor, no puedan compartir
-    file.setShareableByEditors(false); 
-    
-    return `Permiso de edición asignado a ${email}`;
     
   } catch (error) {
+    Logger.log('❌ Error en permisoEdicion: ' + error.toString());
     return `Error al asignar permiso: ${error.toString()}`;
   }
 }
